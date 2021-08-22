@@ -1,16 +1,3 @@
-provider "aws" {
-    region = "eu-west-3"
-}
-
-
-variable vpc_cidr_block {}
-variable subnet_cidr_block {}
-variable avail_zone {}
-variable env_prefix {}
-variable my_ip {}
-variable instance_type {}
-variable public_key_location {}
-
 resource "aws_vpc" "myapp-vpc" {
     cidr_block = var.vpc_cidr_block
     tags = {
@@ -18,54 +5,14 @@ resource "aws_vpc" "myapp-vpc" {
     }
 }
 
-resource "aws_subnet" "myapp-subnet" {
+module "myapp-subnet" {
+    source = "./modules/subnet"
     vpc_id = aws_vpc.myapp-vpc.id
-    cidr_block = var.subnet_cidr_block
-    availability_zone = var.avail_zone
-    tags = {
-        Name = "${var.env_prefix}-subnet-1"
-    }
+    subnet_cidr_block = var.subnet_cidr_block
+    avail_zone = var.avail_zone
+    env_prefix = var.env_prefix
+    vpc_default_route_table_id = aws_vpc.myapp-vpc.default_route_table_id
 }
-
-resource "aws_internet_gateway" "myapp-igw" {
-    vpc_id = aws_vpc.myapp-vpc.id
-    tags = {
-        Name = "${var.env_prefix}-igw"
-    }
-}
-
-// create new route table and attach it to subnet
-/*
-resource "aws_route_table" "myapp-rtb" {
-    vpc_id = aws_vpc.myapp-vpc.id
-    route {
-        cidr_block = "0.0.0.0/0"
-        gateway_id = aws_internet_gateway.myapp-igw.id
-    }
-    tags = {
-        Name = "${var.env_prefix}-rtb"
-    }
-}
-
-resource "aws_route_table_association" "a-rtb-subnet" {
-    subnet_id = aws_subnet.myapp-subnet.id
-    route_table_id = aws_route_table.myapp-route-table.id
-}
-*/
-
-// use main route table which is attached to all subnets in the vpc by default
-// just add the last resort route "0.0.0.0/0"
-resource "aws_default_route_table" "myapp-main-rtb" {
-    default_route_table_id = aws_vpc.myapp-vpc.default_route_table_id
-    route {
-        cidr_block = "0.0.0.0/0"
-        gateway_id = aws_internet_gateway.myapp-igw.id
-    }
-    tags = {
-        Name = "${var.env_prefix}-main-rtb"
-    }
-}
-
 // create new security group
 /*
 resource "aws_security_group" "myapp-sg" {
@@ -134,11 +81,6 @@ data "aws_ami" "latest_amazon_linux_image" {
     }
 
 }
-/*
-output "aws_ami" {
-    value = data.aws_ami.latest_amazon_linux_image.id
-}
-*/
 
 resource "aws_key_pair" "ssh-key" {
     key_name = "myapp-server-key"
@@ -151,7 +93,7 @@ resource "aws_instance" "myapp-server" {
     instance_type =  var.instance_type
 
     //optional attributes , take default if not defined
-    subnet_id = aws_subnet.myapp-subnet.id
+    subnet_id = module.myapp-subnet.subnet.id
     vpc_security_group_ids = [aws_default_security_group.myapp-default-sg.id]
     availability_zone = var.avail_zone
 
@@ -164,14 +106,9 @@ resource "aws_instance" "myapp-server" {
                     sudo yum update -y && sudo yum install -y docker
                     sudo systemctl start docker
                     sudo usermod -aG docker ec2-user
-                    docker run -p 8080:80 nginx
+                    sudo docker run -p 8080:80 nginx
                 EOF
     tags = {
         Name = "${var.env_prefix}-server"
     }
-}
-
-
-output "myapp_server_public_ip" {
-    value = aws_instance.myapp-server.public_ip
 }
